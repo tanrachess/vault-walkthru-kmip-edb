@@ -1,0 +1,75 @@
+# Your EDB is running in Linux server 
+*Download EDB repo (Based on your server version
+*Download edb-tde-client
+Reference : https://www.enterprisedb.com/docs/partner_docs/HashicorpVault/04-ConfiguringHashicorpVault/
+
+1.0 Import your key.pem.ec, cert.pem and ca.cert
+vi key.pem.ec <copy and paste the entire stack>
+vi cert.pem <copy and paste the entire stack>
+vi ca.cert <copy and paste the entire stack>
+
+1.1 Decrypt your key.pem.ec 
+openssl pkcs8 -topk8 -nocrypt -in key.pem.ec -out key.pem
+
+1.2 Check if you have python3 & Pip
+python --version
+
+python3 -m pip --version
+pip install PyKMIP
+
+*PIP is to download pykmip. If you have pykmip installed check using the following : 
+python3 -c "import kmip; print('pykmip is installed')"
+If its installed - you will get a message saying “pykmip is installed”
+
+1.3 Create your pykmip.conf file
+vi pykmip.conf
+<Paste the following content>
+[client]
+host=<vault server ip>
+port=5696
+keyfile=key.pem
+certfile=cert.pem
+ca_certs=vault-ca.pem
+
+1.4 Generate the KEK for EDB
+Create a tde.py file :
+vi tde.py
+
+<Paste the following content>
+
+from kmip.pie import client
+from kmip import enums
+c = client.ProxyKmipClient(config_file='pykmip.conf')
+c.open()
+key_id = c.create(enums.CryptographicAlgorithm.AES, 128, name='edbtestkeyb') # (`edbtestkey` is the name that we chose for our TDE master key. Alter this per your naming requirements.)
+print(key_id)
+c.activate(key_id) # key_id 'key_output_shows_here'
+c.close()
+
+You are creating a script so that you can reuse it, to run it. Run python3 tde.py
+*If there is a networking set up between EDB and Vault, it should load up - when it takes long, there is probably a connection issue. 
+*Go to EDB server, open up internet browser - use your Vault private IP address + port (8200) see if you can access.
+That output (ynk7NT6XOMDXjPGtIC3dt28M4LgbMYS3) is the key ID returned by your KMIP server when you successfully created the AES key.
+You can now use this key ID (ynk7NT6XOMDXjPGtIC3dt28M4LgbMYS3) for operations like activation, retrieval, and deletion.
+This ie Key Encryption Key (KEK) or TDE Master Key used to protect DEKs.
+
+2.0 To test your code
+printf secret | python3 /tmp/edb_tde_kmip_client.py encrypt --out-file=test.bin --pykmip-config-file=/tmp/pykmip.conf --key-uid=’ynk7NT6XOMDXjPGtIC3dt28M4LgbMYS3’ --variant=pykmip
+
+The string secret is passed as input.
+The script connects to the KMIP server using the pykmip.conf configuration.
+It uses the specified TDE Master Key (via its UUID) to encrypt the data (secret).
+The encrypted result is written to the file test.bin.
+
+
+python3 /tmp/edb_tde_kmip_client.py decrypt --in-file=test.bin --pykmip-config-file=/tmp/pykmip.conf --key-uid=’ynk7NT6XOMDXjPGtIC3dt28M4LgbMYS3’--variant=pykmip
+
+Now we are decrypting the file and it should return “secret” which is what we initially input
+The commands you provided are more about verifying that KMIP communication and the KMIP key management work
+
+KMIP Connection from EDB to Vault:
+The edb_tde_kmip_client.py script connects to the KMIP server (Vault in your case) via the configuration file (pykmip.conf).
+If the KMIP client (EDB) is able to connect to the KMIP server (Vault) and perform operations like encryption and decryption, that proves the KMIP connection is working.
+The script uses the specified key UUID to encrypt and decrypt data. If the encryption and decryption work, it proves that the TDE Master Key (KEK) is available and functional.
+Successful encryption means the key exists and is accessible from the KMIP server, and successful decryption means that the key is being used correctly for key management operations.
+
